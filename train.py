@@ -11,7 +11,6 @@ from losses import gradient_penalty, compute_l1
 import matplotlib.pyplot as plt
 import torchvision.utils as vutils
 
-# --- Scoring Logic ---
 def get_anomaly_score(generator, encoder, discriminator, images, lambda_):
     generator.eval()
     encoder.eval()
@@ -65,7 +64,7 @@ def plot_loss_curves(history, save_path="plots"):
     import os
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-        
+
     plt.figure(figsize=(10, 5))
     plt.plot(history['d_loss'], label='D Loss')
     plt.plot(history['ge_loss'], label='GE Loss')
@@ -77,97 +76,7 @@ def plot_loss_curves(history, save_path="plots"):
     plt.close()
 
 
-def train(args):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    train_loader, test_loader, classes = get_dataloaders(args.image_size, args.batch_size)
-    
-    # Model Initialization
 
-    LATENT_SIZE = 128
-    CHANNELS = 3
-    IMG_SIZE = 512
-    BATCH_SIZE = 4
-
-    # Instantiate models
-    netG = Generator(LATENT_SIZE, CHANNELS, upsample_first=False, bn_type='batch')
-    netE = Encoder(IMG_SIZE, LATENT_SIZE, bn_type='instance')
-    netD = Discriminator(IMG_SIZE, LATENT_SIZE, bn_type='layer')
-
-
-    optGE = optim.Adam(list(netG.parameters()) + list(netE.parameters()), 
-                       lr=args.lr, betas=(float(args.ge_beta1), float(args.ge_beta2) ))
-    optD = optim.Adam(netD.parameters(), lr=args.lr, betas=(args.d_beta1, args.d_beta2))
-
-    # History for plotting
-    history = {'d_loss': [], 'ge_loss': [], 'auc': []}
-
-    for epoch in range(args.epochs):
-        netG.train(); netE.train(); netD.train()
-        pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
-        
-        for i, (images, _) in enumerate(pbar):
-            images = images.to(device)
-            batch_size = images.size(0)
-            z = torch.randn(batch_size, args.latent_size).to(device)
-
-            # --- D Update ---
-            optD.zero_grad()
-            z_encoded = netE(images).detach()
-            x_gen = netG(z).detach()
-            
-            d_loss = (netD(x_gen, z) - netD(images, z_encoded)).mean()
-            gp = gradient_penalty(netD, images, x_gen, z_encoded, z, device)
-            d_total_loss = d_loss + args.gp_weight * gp
-            d_total_loss.backward()
-            optD.step()
-
-            # --- GE Update ---
-            if i % args.d_iter == 0:
-                optGE.zero_grad()
-                z_encoded = netE(images)
-                x_gen = netG(z)
-                
-                # Adversarial + Consistency Loss
-                ge_adv = (netD(images, z_encoded) - netD(x_gen, z)).mean()
-                l_rec_x = compute_l1(images, netG(z_encoded))
-                l_rec_z = compute_l1(z, netE(x_gen))
-                
-                ge_total_loss = (1 - args.alpha) * ge_adv + args.alpha * (l_rec_x + l_rec_z)
-                ge_total_loss.backward()
-                optGE.step()
-
-                # Track metrics for visualization every 100 steps
-                if i % 100 == 0:
-                    history['d_loss'].append(d_total_loss.item())
-                    history['ge_loss'].append(ge_total_loss.item())
-                
-                pbar.set_postfix({"D": f"{d_total_loss.item():.3f}", "GE": f"{ge_total_loss.item():.3f}"})
-
-        # --- Visualizations at end of Epoch ---
-        # 1. Save reconstruction samples
-        save_reconstruction_grid(images, netE, netG, epoch, device)
-        
-        # 2. Update Loss Plot
-        plot_loss_curves(history)
-        
-        # 3. Perform Evaluation and track AUC
-        auc = evaluate(netG, netE, netD, test_loader, device, args.lambda_, classes)
-        history['auc'].append(auc)
-        print(f"Epoch {epoch} | AUC: {auc:.4f}")
-
-        torch.save({
-            'generator': generator.state_dict(),
-            'encoder': encoder.state_dict(),
-            'discriminator': discriminator.state_dict(),
-            'config': config
-        }, 'final_model.pth')
-
-        pd.DataFrame(history).to_csv('final_training_log.csv', index=False)
-        print("Training completed!")
-
-
-
-        
 def evaluate(netG, netE, netD, test_loader, device, lambda_, classes):
     all_scores = []
     all_labels = []
@@ -190,7 +99,94 @@ def evaluate(netG, netE, netD, test_loader, device, lambda_, classes):
     auc = metrics.auc(fpr, tpr)
     print(f">> Eval AUC: {auc:.4f}")
 
-if __name__ == "__main__":
+
+
+def train(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    train_loader, test_loader, classes = get_dataloaders(args.image_size, args.batch_size)
+    
+    LATENT_SIZE = 128
+    CHANNELS = 3
+    IMG_SIZE = 512
+    BATCH_SIZE = 4
+
+    # Instantiate models
+    netG = Generator(LATENT_SIZE, CHANNELS, upsample_first=False, bn_type='batch')
+    netE = Encoder(IMG_SIZE, LATENT_SIZE, bn_type='instance')
+    netD = Discriminator(IMG_SIZE, LATENT_SIZE, bn_type='layer')
+
+    optGE = optim.Adam(list(netG.parameters()) + list(netE.parameters()), 
+                       lr=args.lr, betas=(float(args.ge_beta1), float(args.ge_beta2) ))
+    optD = optim.Adam(netD.parameters(), lr=args.lr, betas=(args.d_beta1, args.d_beta2))
+
+    history = {'d_loss': [], 'ge_loss': [], 'auc': []}
+    for epoch in args.epoch:
+        netG.train(); netE.train(); netD.train()
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
+        
+        for i, (images, _) in enumerate(pbar):
+            z = torch.randn(batch_size, args.latent_size).to(device)    
+            
+            generated_image = netG(z).detach()
+            generated_latent = netE(images).detach()
+            
+            reconstructed_image = netE(generated_latent).detach()
+            reconstructed_latent = netG(generated_image).detach()
+            
+            # Model Update
+            if i % args.d_iter == 0:
+                optD.zero_grad()
+                real_score = discriminator([images, generated_latent], training=d_train)  # D(x, E(x))
+                fake_score = discriminator([generated_images, latent], training=d_train)  # D(G(z), z)
+                
+                real_score = netD(images, generated_latent).detach()
+                fake_score = netD(generated_image, latent).detach()
+                
+                d_loss = (fake_score - real_score).mean();
+                
+                gradient_penalty_loss = gradient_penalty(discriminator,
+                                                         images, generated_images,
+                                                         latent, generated_latent, device)
+                discriminator_total_loss = d_loss + gp_weight * gradient_penalty_loss        
+                discriminator_total_loss.backward()
+                optD.step()
+            else:
+                optGE.zero_grad()
+                generator_encoder_loss = (real_score - fake_score).mean() # L_E,G
+                
+                images_reconstruction_loss = (l1(images, reconstructed_images)).mean()  # L_R
+                latent_reconstruction_loss = (l1(latent, reconstructed_latent)).mean()  # L_R'
+                consistency_loss = images_reconstruction_loss + latent_reconstruction_loss  # L_C
+                
+                generator_encoder_total_loss = (1 - alpha) * generator_encoder_loss + alpha * consistency_loss  # L*_E,G
+                ge_total_loss.backward()
+                optGE.step()
+
+            if i % 100 == 0:
+                history['d_loss'].append(d_total_loss.item())
+                history['ge_loss'].append(ge_total_loss.item())
+
+            pbar.set_postfix({"D": f"{d_total_loss.item():.3f}", "GE": f"{ge_total_loss.item():.3f}"})
+
+        save_reconstruction_grid(images, netE, netG, epoch, device)
+        plot_loss_curves(history)
+        
+        auc = evaluate(netG, netE, netD, test_loader, device, args.lambda_, classes)
+        history['auc'].append(auc)
+        print(f"Epoch {epoch} | AUC: {auc:.4f}")
+
+        torch.save({
+            'generator': generator.state_dict(),
+            'encoder': encoder.state_dict(),
+            'discriminator': discriminator.state_dict(),
+            'config': config
+        }, 'final_model.pth')
+
+        pd.DataFrame(history).to_csv('final_training_log.csv', index=False)
+        print("Training completed!")
+
+            
+def main():    
     class Args:
         image_size = 512
         batch_size = 32
@@ -204,5 +200,6 @@ if __name__ == "__main__":
         d_iter = 1 # Update GE every d_iter steps
         epochs = 50
         lambda_ = 0.1 # Weight for feature distance in scoring
-
-    train(Args())
+        
+        train(Args())
+    
