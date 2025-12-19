@@ -1,33 +1,44 @@
 import torch
-import torch.nn.functional as F
+import torch.nn as nn
+import torch.autograd as autograd
 
-def gradient_penalty(discriminator, real_images, fake_images, real_latent, fake_latent, device):
-    batch_size = real_images.size(0)
-    alpha = torch.rand(batch_size, 1, 1, 1).to(device)
-    alpha_l = alpha.view(batch_size, 1) # Match latent dims
+def l1(x, y):
+    """
+    Computes L1 distance keeping batch dimension.
+    """
+    x = x.view(x.size(0), -1)
+    y = y.view(y.size(0), -1)
+    return torch.sum(torch.abs(x - y), dim=1)
 
-    interpolated_img = (alpha * real_images + (1 - alpha) * fake_images).requires_grad_(True)
-    interpolated_lat = (alpha_l * real_latent + (1 - alpha_l) * fake_latent).requires_grad_(True)
+def gradient_penalty(discriminator, x, x_gen, z, z_gen, device):
+    """
+    Calculates the WGAN-GP gradient penalty.
+    """
+    batch_size = x.size(0)
+    
+    alpha = torch.rand(batch_size, 1, device=device)
+    alpha_img = alpha.view(batch_size, 1, 1, 1) 
+    alpha_z = alpha.view(batch_size, 1)
 
-    d_interpolated = discriminator(interpolated_img, interpolated_lat)
+    x_hat = (alpha_img * x + (1 - alpha_img) * x_gen).detach().requires_grad_(True)
+    z_hat = (alpha_z * z + (1 - alpha_z) * z_gen).detach().requires_grad_(True)
+    score_hat = discriminator(x_hat, z_hat)
 
-    # Calculate gradients w.r.t. interpolated inputs
-    gradients = torch.autograd.grad(
-        outputs=d_interpolated,
-        inputs=[interpolated_img, interpolated_lat],
-        grad_outputs=torch.ones(d_interpolated.size()).to(device),
+    gradients = autograd.grad(
+        outputs=score_hat,
+        inputs=[x_hat, z_hat],
+        grad_outputs=torch.ones_like(score_hat),
         create_graph=True,
         retain_graph=True,
-        only_inputs=True,
+        only_inputs=True
     )
     
-    # Flatten and concatenate gradients for Image and Latent
-    grad_img = gradients[0].view(batch_size, -1)
-    grad_lat = gradients[1].view(batch_size, -1)
-    grad_combined = torch.cat([grad_img, grad_lat], dim=1)
+    dx, dz = gradients
     
-    grad_norm = grad_combined.norm(2, dim=1)
-    return ((grad_norm - 1) ** 2).mean()
-
-def compute_l1(x, y):
-    return F.l1_loss(x, y, reduction='mean')
+    dx = dx.view(dx.size(0), -1)
+    dz = dz.view(dz.size(0), -1)
+    
+    grads = torch.cat([dx, dz], dim=1)
+    grads_norm = torch.sqrt(torch.sum(grads ** 2, dim=1) + 1e-12)    
+    norm_penalty = (grads_norm - 1) ** 2
+    return norm_penalty.mean()
