@@ -135,10 +135,7 @@ def train(args):
             
             # Model Update
             if i % args.d_iter == 0:
-                optD.zero_grad()
-                real_score = discriminator([images, generated_latent], training=d_train)  # D(x, E(x))
-                fake_score = discriminator([generated_images, latent], training=d_train)  # D(G(z), z)
-                
+                optD.zero_grad()        
                 real_score = netD(images, generated_latent).detach()
                 fake_score = netD(generated_image, latent).detach()
                 
