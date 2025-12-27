@@ -4,10 +4,6 @@ from tqdm import tqdm
 import numpy as np
 from sklearn import metrics
 
-from model import Generator, Encoder, Discriminator
-from dataset import get_dataloaders
-from losses import gradient_penalty, compute_l1
-
 import matplotlib.pyplot as plt
 import torchvision.utils as vutils
 
@@ -105,10 +101,9 @@ def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_loader, test_loader, classes = get_dataloaders(args.image_size, args.batch_size)
     
-    LATENT_SIZE = 128
-    CHANNELS = 3
-    IMG_SIZE = 512
-    BATCH_SIZE = 4
+    LATENT_SIZE = args.latent_size
+    CHANNELS = args.channels
+    IMG_SIZE = args.image_size
 
     # Instantiate models
     netG = Generator(LATENT_SIZE, CHANNELS, upsample_first=False, bn_type='batch')
@@ -125,37 +120,43 @@ def train(args):
         pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
         
         for i, (images, _) in enumerate(pbar):
+            batch_size = images.size(0)
             z = torch.randn(batch_size, args.latent_size).to(device)    
             
-            generated_image = netG(z).detach()
-            generated_latent = netE(images).detach()
-            
-            reconstructed_image = netE(generated_latent).detach()
-            reconstructed_latent = netG(generated_image).detach()
+            generated_image = netG(z)
+            generated_latent = netE(images)
+
+            reconstructed_image = netG(generated_latent) 
+            reconstructed_latent = netE(generated_image)
             
             # Model Update
             if i % args.d_iter == 0:
-                optD.zero_grad()        
-                real_score = netD(images, generated_latent).detach()
-                fake_score = netD(generated_image, latent).detach()
+                optD.zero_grad()
+
+                real_score = netD(images, generated_latent.detach())
+                fake_score = netD(generated_image.detach(), z)
                 
-                d_loss = (fake_score - real_score).mean();
-                
-                gradient_penalty_loss = gradient_penalty(discriminator,
-                                                         images, generated_images,
-                                                         latent, generated_latent, device)
-                discriminator_total_loss = d_loss + gp_weight * gradient_penalty_loss        
-                discriminator_total_loss.backward()
+                d_loss = fake_score.mean() - real_score.mean();
+                gp = gradient_penalty(netD, images, fake_image.detach(), 
+                                      encoded_latent.detach(), z, device)
+
+                d_total_loss = d_loss + args.gp_weight * gp        
+                d_total_loss.backward()
                 optD.step()
             else:
                 optGE.zero_grad()
-                generator_encoder_loss = (real_score - fake_score).mean() # L_E,G
                 
-                images_reconstruction_loss = (l1(images, reconstructed_images)).mean()  # L_R
-                latent_reconstruction_loss = (l1(latent, reconstructed_latent)).mean()  # L_R'
+                real_score = netD(images, generated_latent)
+                fake_score = netD(generated_image, z)
+
+                generator_encoder_loss = real_score.mean() - fake_score.mean() # L_E,G
+                
+                images_reconstruction_loss = l1(images, reconstructed_image)
+                latent_reconstruction_loss = l1(latent, reconstructed_latent)
+
                 consistency_loss = images_reconstruction_loss + latent_reconstruction_loss  # L_C
                 
-                generator_encoder_total_loss = (1 - alpha) * generator_encoder_loss + alpha * consistency_loss  # L*_E,G
+                ge_total_loss = (1 - args.alpha) * generator_encoder_loss + args.alpha * consistency_loss  # L*_E,G
                 ge_total_loss.backward()
                 optGE.step()
 
@@ -173,9 +174,9 @@ def train(args):
         print(f"Epoch {epoch} | AUC: {auc:.4f}")
 
         torch.save({
-            'generator': generator.state_dict(),
-            'encoder': encoder.state_dict(),
-            'discriminator': discriminator.state_dict(),
+            'generator': netG.state_dict(),
+            'encoder': netE.state_dict(),
+            'discriminator': netD.state_dict(),
             'config': config
         }, 'final_model.pth')
 
@@ -186,7 +187,7 @@ def train(args):
 def main():    
     class Args:
         image_size = 512
-        batch_size = 32
+        batch_size = 64
         latent_size = 128
         channels = 3
         lr = 1e-4
@@ -199,4 +200,3 @@ def main():
         lambda_ = 0.1 # Weight for feature distance in scoring
         
         train(Args())
-    

@@ -3,12 +3,7 @@ import torch.nn as nn
 import torch.autograd as autograd
 
 def l1(x, y):
-    """
-    Computes L1 distance keeping batch dimension.
-    """
-    x = x.view(x.size(0), -1)
-    y = y.view(y.size(0), -1)
-    return torch.sum(torch.abs(x - y), dim=1)
+    return torch.mean(torch.abs(x - y))
 
 def gradient_penalty(discriminator, x, x_gen, z, z_gen, device):
     """
