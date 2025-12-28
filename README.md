@@ -7,26 +7,7 @@ The model is trained exclusively on **benign (normal) data**. It learns the unde
 
 
 ## 📊 Key Performance
-Using the [DikeDataset](https://github.com/iosifache/DikeDataset) as a data source, malware binaries were converted to images through the [SABV](https://github.com/SABV-repo) package method.
+Using the [DikeDataset](https://github.com/iosifache/DikeDataset) as a data source, malware binaries were converted to images through the [SABV](https://github.com/SABV-repo) package.
 
 * **Peak AUC:** 0.82
 * **Resolution:** $512 \times 512$ pixels
-
-
-## ⚙️ Installation & Setup
-
-### 1. Clone the Repository
-```bash
-git clone [https://github.com/AquaCoder0010/Osage-SAMD](https://github.com/AquaCoder0010/Osage-SAMD)
-```
-### 2. Install Dependencies
-```bash
-pip install pytorch
-pip install SABV
-```
-### 3. Modify infer.py
-```bash
-python3 infer.py
-```
-
-Training is done via the notebook in the github repository.
