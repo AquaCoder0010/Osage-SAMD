@@ -79,16 +79,22 @@ class Osage_SAMD:
         }
 
     def scan_file(file_path):
-        
+        img = sabv.process_file(mal_exe)
+        results = get_prediction(self.netG, self.netE, self.netD, img)
+        return results    
+
         
     def scan_dir(dir_path):
-        
+        correct = 0;
+        total = 0;
+        for mal_exe in find_exe_files(malware_path)[1000:1100]:
+            img = sabv.process_file(mal_exe)
+            results = get_prediction(netG, netE, netD, img)
+            print(f" {total + 1} Malware file {mal_exe} is evaluated to be {results["status"]} with score {results["score"]}")
+            correct += 1 if results["status"] == "MALWARE" else 0
+            total += 1
 
-
-        
-
-
-
+        print(f"accuracy : {correct / total}")
 
 
 if __name__ == "__main__":
